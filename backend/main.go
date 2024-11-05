@@ -6,12 +6,14 @@ import (
 	"fmt"
 	"html/template"
 	"log"
+	"math"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
-	"math"
 
 	"github.com/gorilla/websocket"
+	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
 )
 
@@ -34,38 +36,56 @@ type Mission struct {
 	Status   string    `json:"status"`
 }
 
-var db *sql.DB
-var upgrader = websocket.Upgrader{
+type Server struct{
+	db *sql.DB
+	upgrader websocket.Upgrader
+}
+
+func NewServer(db *sql.DB) *Server{
+	return &Server{
+		db: db,
+		upgrader: websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool {
 		return true
 	},
-}
+},
 
-func initDB() {
+	}
+}
+func initDB(db *sql.DB) (*sql.DB, error){
 	var err error
+	if err = godotenv.Load(); err!=nil{
+		return nil, err
+	}
 	connStr := fmt.Sprintf("user=%s dbname=%s sslmode=disable password=%s",
 		os.Getenv("DB_USER"), os.Getenv("DB_NAME"), os.Getenv("DB_PASSWORD"))
 	db, err = sql.Open("postgres", connStr)
 	if err != nil {
-		log.Fatal(err)
+		return nil, err
 	}
+	return db, nil
 }
 
-func handleTelemetry(w http.ResponseWriter, r *http.Request) {
-	conn, err := upgrader.Upgrade(w, r, nil)
+func (s *Server) handleTelemetry(w http.ResponseWriter, r *http.Request) {
+	conn, err := s.upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Println("Upgrade:", err)
 		return
 	}
 	defer conn.Close()
-
-	missionID := r.URL.Query().Get("mission_id")
-	if missionID == "" {
-		missionID = "1" // Default mission ID if none provided
+	req := r.URL.Query().Get("mission_id")
+	if req == ""{
+		log.Println("mission_id is empty")
+		return
+	}else {
+		
+	missionID, err := strconv.Atoi(req)
+	if err !=nil{
+		log.Fatal(err)
+		// return
 	}
-
 	for {
-		rows, err := db.Query("SELECT latitude, longitude, timestamp FROM waypoints WHERE mission_id = $1 ORDER BY timestamp ASC", missionID)
+		rows, err := s.db.Query("SELECT latitude, longitude, timestamp FROM waypoints WHERE mission_id = $1 ORDER BY timestamp ASC", missionID)
 		if err != nil {
 			log.Println("DB Query Error:", err)
 			return
@@ -87,11 +107,12 @@ func handleTelemetry(w http.ResponseWriter, r *http.Request) {
 		}
 		rows.Close()
 	}
+		}
 }
 
 // Calculate total distance and duration of a mission
-func calculateMissionSummary(missionID string) (float64, time.Duration) {
-	rows, err := db.Query("SELECT latitude, longitude, timestamp FROM waypoints WHERE mission_id = $1 ORDER BY timestamp ASC", missionID)
+func (s *Server) calculateMissionSummary(missionID string) (float64, time.Duration) {
+	rows, err := s.db.Query("SELECT latitude, longitude, timestamp FROM waypoints WHERE mission_id = $1 ORDER BY timestamp ASC", missionID)
 	if err != nil {
 		log.Println("DB Query Error:", err)
 		return 0, 0
@@ -141,13 +162,13 @@ func haversine(lat1, lon1, lat2, lon2 float64) float64 {
 	return R * c
 }
 
-func handleIndex(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	missionID := r.URL.Query().Get("mission_id")
 	if missionID == "" {
 		missionID = "1" // Default mission ID
 	}
 
-	distance, duration := calculateMissionSummary(missionID)
+	distance, duration := s.calculateMissionSummary(missionID)
 
 	data := struct {
 		Distance float64
@@ -156,7 +177,7 @@ func handleIndex(w http.ResponseWriter, r *http.Request) {
 	}{
 		Distance: distance,
 		Duration: duration,
-		Missions: getAllMissions(),
+		Missions: s.getAllMissions(),
 	}
 
 	tmpl, err := template.ParseFiles("templates/index.html")
@@ -168,8 +189,8 @@ func handleIndex(w http.ResponseWriter, r *http.Request) {
 }
 
 // Get all missions from the database
-func getAllMissions() []Mission {
-	rows, err := db.Query("SELECT id, name, COALESCE(status, 'unknown') FROM missions ORDER BY id ASC")
+func (s *Server) getAllMissions() []Mission {
+	rows, err := s.db.Query("SELECT id, name, COALESCE(status, 'unknown') FROM missions ORDER BY id ASC")
 	if err != nil {
 		log.Println("DB Query Error:", err)
 		return nil
@@ -190,14 +211,16 @@ func getAllMissions() []Mission {
 }
 
 func main() {
-	initDB()
-	http.HandleFunc("/telemetry", handleTelemetry)
-	http.HandleFunc("/", handleIndex)
-	http.HandleFunc("/add_geofence", handleAddGeofence)
-	http.HandleFunc("/add_mission", handleAddMission)
-	http.HandleFunc("/missions", handleGetMissions)
-	http.HandleFunc("/add_waypoint", handleAddWaypoint)
-	http.HandleFunc("/clear_all", handleClearAll)
+	db, _ := initDB(&sql.DB{})
+	srv := NewServer(db)
+	http.HandleFunc("/telemetry", srv.handleTelemetry)
+	
+	http.HandleFunc("/", srv.handleIndex)
+	http.HandleFunc("/add_geofence", srv.handleAddGeofence)
+	http.HandleFunc("/add_mission", srv.handleAddMission)
+	http.HandleFunc("/missions", srv.handleGetMissions)
+	http.HandleFunc("/add_waypoint", srv.handleAddWaypoint)
+	http.HandleFunc("/clear_all", srv.handleClearAll)
 	fmt.Println("Server started at :8080")
 	log.Fatal(http.ListenAndServe(":8080", nil))
 }
@@ -209,7 +232,7 @@ type AddGeofenceRequest struct {
 	Vertices [][2]float64 `json:"vertices"`
 }
 
-func handleAddGeofence(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleAddGeofence(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
 		return
@@ -226,14 +249,14 @@ func handleAddGeofence(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, err := db.Exec("INSERT INTO geofences (mission_id, name) VALUES ($1, $2) RETURNING id", req.MissionID, req.Name)
+	_, err := s.db.Exec("INSERT INTO geofences (mission_id, name) VALUES ($1, $2) RETURNING id", req.MissionID, req.Name)
 	if err != nil {
 		http.Error(w, "Failed to add geofence", http.StatusInternalServerError)
 		return
 	}
 
 	for _, vertex := range req.Vertices {
-		_, err := db.Exec("INSERT INTO geofence_vertices (geofence_id, latitude, longitude) VALUES ((SELECT id FROM geofences WHERE mission_id=$1 AND name=$2), $3, $4)", req.MissionID, req.Name, vertex[0], vertex[1])
+		_, err := s.db.Exec("INSERT INTO geofence_vertices (geofence_id, latitude, longitude) VALUES ((SELECT id FROM geofences WHERE mission_id=$1 AND name=$2), $3, $4)", req.MissionID, req.Name, vertex[0], vertex[1])
 		if err != nil {
 			http.Error(w, "Failed to add geofence vertex", http.StatusInternalServerError)
 			return
@@ -248,7 +271,7 @@ type AddMissionRequest struct {
 	Name string `json:"name"`
 }
 
-func handleAddMission(w http.ResponseWriter, r *http.Request) {
+func (s * Server) handleAddMission(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
 		return
@@ -260,7 +283,7 @@ func handleAddMission(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, err := db.Exec("INSERT INTO missions (name, status) VALUES ($1, 'active')", req.Name)
+	_, err := s.db.Exec("INSERT INTO missions (name, status) VALUES ($1, 'active')", req.Name)
 	if err != nil {
 		http.Error(w, "Failed to add mission", http.StatusInternalServerError)
 		return
@@ -270,8 +293,8 @@ func handleAddMission(w http.ResponseWriter, r *http.Request) {
 }
 
 // Handler to get all missions
-func handleGetMissions(w http.ResponseWriter, r *http.Request) {
-	missions := getAllMissions()
+func (s *Server) handleGetMissions(w http.ResponseWriter, r *http.Request) {
+	missions := s.getAllMissions()
 	if missions == nil {
 		http.Error(w, "No missions found", http.StatusNotFound)
 		return
@@ -294,7 +317,7 @@ type AddWaypointRequest struct {
 	Timestamp time.Time `json:"timestamp"`
 }
 
-func handleAddWaypoint(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleAddWaypoint(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
 		return
@@ -311,7 +334,7 @@ func handleAddWaypoint(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, err := db.Exec("INSERT INTO waypoints (mission_id, latitude, longitude, timestamp) VALUES ($1, $2, $3, $4)", req.MissionID, req.Latitude, req.Longitude, req.Timestamp)
+	_, err := s.db.Exec("INSERT INTO waypoints (mission_id, latitude, longitude, timestamp) VALUES ($1, $2, $3, $4)", req.MissionID, req.Latitude, req.Longitude, req.Timestamp)
 	if err != nil {
 		http.Error(w, "Failed to add waypoint", http.StatusInternalServerError)
 		return
@@ -321,31 +344,31 @@ func handleAddWaypoint(w http.ResponseWriter, r *http.Request) {
 }
 
 // Handler to clear all missions, waypoints, and geofences
-func handleClearAll(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleClearAll(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
 		return
 	}
 
-	_, err := db.Exec("DELETE FROM waypoints")
+	_, err := s.db.Exec("DELETE FROM waypoints")
 	if err != nil {
 		http.Error(w, "Failed to clear waypoints", http.StatusInternalServerError)
 		return
 	}
 
-	_, err = db.Exec("DELETE FROM geofence_vertices")
+	_, err = s.db.Exec("DELETE FROM geofence_vertices")
 	if err != nil {
 		http.Error(w, "Failed to clear geofence vertices", http.StatusInternalServerError)
 		return
 	}
 
-	_, err = db.Exec("DELETE FROM geofences")
+	_, err = s.db.Exec("DELETE FROM geofences")
 	if err != nil {
 		http.Error(w, "Failed to clear geofences", http.StatusInternalServerError)
 		return
 	}
 
-	_, err = db.Exec("DELETE FROM missions")
+	_, err = s.db.Exec("DELETE FROM missions")
 	if err != nil {
 		http.Error(w, "Failed to clear missions", http.StatusInternalServerError)
 		return

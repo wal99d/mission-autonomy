@@ -40,6 +40,9 @@
         .controls {
             margin-bottom: 20px;
         }
+        .draggable-icon {
+            cursor: pointer;
+        }
     </style>
 </head>
 <body class="bg-gray-900 text-gray-100">
@@ -60,8 +63,8 @@
         </div>
         <div id="summary">
             <h2 class="text-lg font-semibold mb-2">Mission Summary</h2>
-            <p class="text-gray-200">Total Distance: {{.Distance}} km</p>
-            <p class="text-gray-200">Duration: {{.Duration}}</p>
+            <p id="total-distance" class="text-gray-200">Total Distance: 0 km</p>
+            <p id="total-duration" class="text-gray-200">Duration: 0</p>
         </div>
         <div id="geofence-alert" class="hidden bg-red-600 text-white p-2 mt-4 rounded">
             <strong>Alert:</strong> Waypoint outside geofenced area!
@@ -140,6 +143,8 @@
                 }).then(response => {
                     if (response.ok) {
                         alert("Waypoint added successfully!");
+                        addWaypointToMap(latitude, longitude);
+                        updateMissionSummary();
                     } else {
                         alert("Failed to add waypoint.");
                     }
@@ -147,70 +152,204 @@
             });
         });
 
+        function loadMissions() {
+            fetch('/missions')
+                .then(response => response.json())
+                .then(data => {
+                    if (!Array.isArray(data)) {
+                        console.error("Missions data is not an array:", data);
+                        return;
+                    }
+                    const missionSelect = document.getElementById("mission-select");
+                    missionSelect.innerHTML = "";
+                    data.forEach(mission => {
+                        let option = document.createElement("option");
+                        option.value = mission.id;
+                        option.textContent = `${mission.name} (${mission.status})`;
+                        missionSelect.appendChild(option);
+                    });
+                })
+                .catch(error => {
+                    console.error('Error fetching missions:', error);
+                });
+        }
 
-	function loadMissions() {
-    fetch('/missions')
-        .then(response => response.json())
-        .then(data => {
-            if (!Array.isArray(data)) {
-                console.error("Missions data is not an array:", data);
-                return;
+        function loadMission() {
+            const missionID = document.getElementById("mission-select").value;
+            if (missionID) {
+                connectWebSocket(missionID);
+                updateMissionSummary();
+            } else {
+                alert("Please select a mission first.");
             }
-            const missionSelect = document.getElementById("mission-select");
-            missionSelect.innerHTML = "";
-            data.forEach(mission => {
-                let option = document.createElement("option");
-                option.value = mission.id;
-                option.textContent = `${mission.name} (${mission.status})`;
-                missionSelect.appendChild(option);
-            });
-        })
-        .catch(error => {
-            console.error('Error fetching missions:', error);
-        });
-}
-
+        }
 
         function clearAllData() {
             fetch('/clear_all', { method: 'POST' }).then(response => {
                 if (response.ok) {
                     alert("All data cleared successfully!");
+                    drawnItems.clearLayers();
+                    if (polyline) {
+                        map.removeLayer(polyline);
+                    }
+                    waypoints = [];
+                    updateMissionSummary();
                 } else {
                     alert("Failed to clear data.");
                 }
             });
         }
 
-	function addMission() {
-        const missionName = prompt("Enter the mission name:");
-        if (missionName) {
-            const missionData = {
-                name: missionName
-            };
+        function addMission() {
+            const missionName = prompt("Enter the mission name:");
+            if (missionName) {
+                const missionData = {
+                    name: missionName
+                };
 
-            fetch('/add_mission', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify(missionData)
-            })
-            .then(response => {
-                if (response.status === 201) {
-                    alert("Mission added successfully!");
-                    loadMissions(); // Reload mission list after adding a new mission
-                } else {
-                    alert("Failed to add mission.");
-                }
-            })
-            .catch(error => {
-                console.error("Error adding mission:", error);
+                fetch('/add_mission', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(missionData)
+                })
+                .then(response => {
+                    if (response.status === 201) {
+                        alert("Mission added successfully!");
+                        loadMissions(); // Reload mission list after adding a new mission
+                    } else {
+                        alert("Failed to add mission.");
+                    }
+                })
+                .catch(error => {
+                    console.error("Error adding mission:", error);
+                });
+            }
+        }
+
+        function addWaypointToMap(lat, lng) {
+            if (!polyline) {
+                waypoints = [];
+                waypoints.push([lat, lng]);
+                polyline = L.polyline(waypoints, { color: 'blue' }).addTo(map);
+            } else {
+                waypoints.push([lat, lng]);
+                polyline.setLatLngs(waypoints);
+            }
+            addCustomMarker(lat, lng);
+        }
+
+        function addCustomMarker(lat, lng) {
+            var icon = L.divIcon({
+                className: 'draggable-icon',
+                html: '<i class="fas fa-map-marker-alt"></i>'
+            });
+            var marker = L.marker([lat, lng], { icon: icon, draggable: true }).addTo(map);
+            marker.on('dragend', function (e) {
+                var newLatLng = e.target.getLatLng();
+                console.log('Marker moved to: ', newLatLng);
             });
         }
+	function addGeofence(vertices) {
+        const missionID = document.getElementById("mission-select").value;
+
+        if (!missionID) {
+            alert("Please select a mission first.");
+            return;
+        }
+
+        const geofenceData = {
+            mission_id: parseInt(missionID),
+            name: "New Geofence",
+            vertices: vertices
+        };
+
+        fetch('/add_geofence', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(geofenceData)
+        }).then(response => {
+            if (response.ok) {
+                alert("Geofence saved successfully!");
+            } else {
+                alert("Failed to save geofence.");
+            }
+        }).catch(error => {
+            console.error("Error saving geofence:", error);
+        });
     }
+
+        function pauseTelemetry() {
+            paused = true;
+            if (ws) {
+                ws.close();
+                ws = null;
+                console.log('Telemetry paused');
+            }
+        }
+
+        function resumeTelemetry() {
+            if (!paused) {
+                console.log('Telemetry is not paused');
+                return;
+            }
+            paused = false;
+            const missionID = document.getElementById("mission-select").value;
+            if (missionID) {
+                connectWebSocket(missionID);
+                console.log('Telemetry resumed');
+            } else {
+                console.error("No mission selected for resuming telemetry.");
+            }
+        }
+
+        function connectWebSocket(missionID) {
+            if (ws) {
+                ws.close();
+            }
+            ws = new WebSocket('ws://' + window.location.host + '/telemetry?mission_id=' + missionID);
+
+            ws.onopen = function () {
+                console.log('WebSocket connection established for mission ID:', missionID);
+            };
+
+            ws.onmessage = function (event) {
+                var waypoint = JSON.parse(event.data);
+                addWaypointToMap(waypoint.latitude, waypoint.longitude);
+                updateMissionSummary();
+            };
+
+            ws.onclose = function () {
+                console.log('WebSocket connection closed');
+            };
+
+            ws.onerror = function (error) {
+                console.error('WebSocket error:', error);
+            };
+        }
+
+        function updateMissionSummary() {
+            if (waypoints.length < 2) {
+                document.getElementById('total-distance').textContent = "Total Distance: 0 km";
+                document.getElementById('total-duration').textContent = "Duration: 0";
+                return;
+            }
+
+            let totalDistance = 0;
+            for (let i = 1; i < waypoints.length; i++) {
+                totalDistance += map.distance(waypoints[i - 1], waypoints[i]) / 1000; // distance in km
+            }
+
+            document.getElementById('total-distance').textContent = `Total Distance: ${totalDistance.toFixed(2)} km`;
+            document.getElementById('total-duration').textContent = `Duration: ${waypoints.length * 2} seconds`; // assuming 2 seconds per waypoint
+        }
 
         // Load all missions on page load
         loadMissions();
     </script>
 </body>
 </html>
+
