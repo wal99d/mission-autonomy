@@ -249,14 +249,15 @@ func (s *Server) handleAddGeofence(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, err := s.db.Exec("INSERT INTO geofences (mission_id, name) VALUES ($1, $2) RETURNING id", req.MissionID, req.Name)
+	var geofenceID int
+	err := s.db.QueryRow("INSERT INTO geofences (mission_id, name) VALUES ($1, $2) RETURNING id", req.MissionID, req.Name).Scan(&geofenceID)
 	if err != nil {
 		http.Error(w, "Failed to add geofence", http.StatusInternalServerError)
 		return
 	}
 
 	for _, vertex := range req.Vertices {
-		_, err := s.db.Exec("INSERT INTO geofence_vertices (geofence_id, latitude, longitude) VALUES ((SELECT id FROM geofences WHERE mission_id=$1 AND name=$2), $3, $4)", req.MissionID, req.Name, vertex[0], vertex[1])
+		_, err := s.db.Exec("INSERT INTO geofence_vertices (geofence_id, latitude, longitude) VALUES ($1, $2, $3)", geofenceID, vertex[0], vertex[1])
 		if err != nil {
 			http.Error(w, "Failed to add geofence vertex", http.StatusInternalServerError)
 			return
@@ -265,6 +266,7 @@ func (s *Server) handleAddGeofence(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusOK)
 }
+
 
 // Handler to add a new mission
 type AddMissionRequest struct {

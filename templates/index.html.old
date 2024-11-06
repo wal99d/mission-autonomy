@@ -13,27 +13,26 @@
     <style>
         #map {
             height: 100vh;
-            width: 100%;
-            position: absolute;
+            width: 70%;
+            position: fixed;
+            right: 0;
             top: 0;
-            left: 0;
-            z-index: 0;
+            border: 2px solid #d1d5db;
         }
         #sidebar {
             width: 30%;
             height: 100vh;
-            position: absolute;
+            position: fixed;
             left: 0;
             top: 0;
-            background-color: rgba(30, 41, 59, 0.4);
+            background-color: #1E293B;
             color: white;
             padding: 20px;
             box-shadow: 0 0 15px rgba(0, 0, 0, 0.5);
             overflow-y: auto;
-            z-index: 1;
         }
         #summary {
-            background-color: rgba(55, 65, 81, 0.4);
+            background-color: #374151;
             padding: 15px;
             border-radius: 8px;
             box-shadow: 0 0 15px rgba(0, 0, 0, 0.3);
@@ -58,14 +57,6 @@
             display: flex;
             align-items: center;
             justify-content: center;
-            transition: transform 0.2s;
-        }
-        .button-container button:hover {
-            transform: scale(1.1);
-        }
-        .leaflet-top.leaflet-right {
-            top: 10px;
-            right: 10px;
         }
     </style>
 </head>
@@ -78,25 +69,25 @@
                 <!-- Mission options populated dynamically -->
             </select>
             <div class="button-container">
-                <button onclick="loadMission()" class="bg-gray-600 hover:bg-gray-700 text-white font-semibold rounded flex items-center" title="Load Mission">
+                <button onclick="loadMission()" class="bg-blue-700 hover:bg-blue-800 text-white font-semibold rounded flex items-center">
                     <i class="fas fa-play"></i>
                 </button>
-                <button onclick="pauseTelemetry()" class="bg-gray-600 hover:bg-gray-700 text-white font-semibold rounded flex items-center" title="Pause Telemetry">
+                <button onclick="pauseTelemetry()" class="bg-orange-600 hover:bg-orange-700 text-white font-semibold rounded flex items-center">
                     <i class="fas fa-pause"></i>
                 </button>
-                <button onclick="resumeTelemetry()" class="bg-gray-600 hover:bg-gray-700 text-white font-semibold rounded flex items-center" title="Resume Telemetry">
+                <button onclick="resumeTelemetry()" class="bg-green-600 hover:bg-green-700 text-white font-semibold rounded flex items-center">
                     <i class="fas fa-play-circle"></i>
                 </button>
-                <button id="saveGeofenceBtn" class="bg-gray-600 hover:bg-gray-700 text-white font-semibold rounded flex items-center" title="Save Geofence">
+                <button id="saveGeofenceBtn" class="bg-purple-600 hover:bg-purple-700 text-white font-semibold rounded flex items-center">
                     <i class="fas fa-draw-polygon"></i>
                 </button>
-                <button onclick="addMission()" class="bg-gray-600 hover:bg-gray-700 text-white font-semibold rounded flex items-center" title="Add Mission">
+                <button onclick="addMission()" class="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded flex items-center">
                     <i class="fas fa-plus"></i>
                 </button>
-                <button id="addWaypointBtn" class="bg-gray-600 hover:bg-gray-700 text-white font-semibold rounded flex items-center" title="Add Waypoint">
+                <button id="addWaypointBtn" class="bg-yellow-600 hover:bg-yellow-700 text-white font-semibold rounded flex items-center">
                     <i class="fas fa-map-marker-alt"></i>
                 </button>
-                <button onclick="clearAllData()" class="bg-red-700 hover:bg-red-800 text-white font-semibold rounded flex items-center" title="Clear All Data">
+                <button onclick="clearAllData()" class="bg-red-700 hover:bg-red-800 text-white font-semibold rounded flex items-center">
                     <i class="fas fa-trash"></i>
                 </button>
             </div>
@@ -113,8 +104,8 @@
     <div id="map"></div>
     <script>
         var map = L.map('map').setView([24.7136, 46.6753], 10);
-        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
         }).addTo(map);
 
         var waypoints = [];
@@ -125,7 +116,6 @@
         map.addLayer(drawnItems);
 
         var drawControl = new L.Control.Draw({
-            position: 'topright',
             edit: {
                 featureGroup: drawnItems
             },
@@ -134,7 +124,7 @@
                 polyline: false,
                 rectangle: false,
                 circle: false,
-                marker: true,
+                marker: false,
             }
         });
         map.addControl(drawControl);
@@ -185,8 +175,7 @@
                     if (response.ok) {
                         alert("Waypoint added successfully!");
                         addWaypointToMap(latitude, longitude);
-                        // updateMissionSummary();
-                        checkGeofenceAlert(latitude, longitude);
+                        updateMissionSummary();
                     } else {
                         alert("Failed to add waypoint.");
                     }
@@ -220,7 +209,7 @@
             const missionID = document.getElementById("mission-select").value;
             if (missionID) {
                 connectWebSocket(missionID);
-                // updateMissionSummary(missionID);
+                updateMissionSummary(missionID);
             } else {
                 alert("Please select a mission first.");
             }
@@ -235,7 +224,7 @@
                         map.removeLayer(polyline);
                     }
                     waypoints = [];
-                    // updateMissionSummary();
+                    updateMissionSummary();
                 } else {
                     alert("Failed to clear data.");
                 }
@@ -291,7 +280,6 @@
             marker.on('dragend', function (e) {
                 var newLatLng = e.target.getLatLng();
                 console.log('Marker moved to: ', newLatLng);
-                checkGeofenceAlert(newLatLng.lat, newLatLng.lng);
             });
         }
 
@@ -331,9 +319,9 @@
 
             ws.onmessage = function (event) {
                 var waypoint = JSON.parse(event.data);
+                console.log('Received waypoint:', waypoint);
                 addWaypointToMap(waypoint.latitude, waypoint.longitude);
-                // updateMissionSummary(missionID);
-                checkGeofenceAlert(waypoint.latitude, waypoint.longitude);
+                updateMissionSummary(missionID);
             };
 
             ws.onclose = function () {
@@ -345,67 +333,21 @@
             };
         }
 
-
-function checkGeofenceAlert(lat, lng) { let alertShown = false;
-	drawnItems.eachLayer(function (layer) {
-    if (layer.options.vertices) {
-        const vertices = layer.options.vertices;
-        const polygon = L.polygon(vertices);
-        if (!polygon.getBounds().contains([lat, lng])) {
-            alertShown = true;
-            document.getElementById('geofence-alert').classList.remove('hidden');
-        }
-    	}
-	});
-
-if (!alertShown) {
-    document.getElementById('geofence-alert').classList.add('hidden');
-}
-}
-	 function addGeofence(vertices) {
-        const missionID = document.getElementById("mission-select").value;
-
-        if (!missionID) {
-            alert("Please select a mission first.");
-            return;
+        function updateMissionSummary(missionID) {
+            fetch(`/?mission_id=${missionID}`)
+                .then(response => response.json())
+                .then(data => {
+                    document.getElementById('total-distance').textContent = `Total Distance: ${data.Distance.toFixed(2)} km`;
+                    document.getElementById('total-duration').textContent = `Duration: ${data.Duration}`;
+                })
+                .catch(error => {
+                    console.error('Error fetching mission summary:', error);
+                });
         }
 
-        const geofenceData = {
-            mission_id: parseInt(missionID),
-            name: "New Geofence",
-            vertices: vertices
-        };
+        // Load all missions on page load
+        loadMissions();
+    </script>
+</body>
+</html>
 
-        fetch('/add_geofence', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify(geofenceData)
-        }).then(response => {
-            if (response.ok) {
-                alert("Geofence saved successfully!");
-            } else {
-                alert("Failed to save geofence.");
-            }
-        }).catch(error => {
-            console.error("Error saving geofence:", error);
-        });
-    }
-
-        // function updateMissionSummary(missionID) {
-        //     fetch(`/?mission_id=${missionID}`)
-        //         .then(response => response.json())
-        //         .then(data => {
-        //             document.getElementById('total-distance').textContent = `Total Distance: ${data.Distance.toFixed(2)} km`;
-        //             document.getElementById('total-duration').textContent = `Duration: ${data.Duration}`;
-        //         })
-        //         .catch(error => {
-        //             console.error('Error fetching mission summary:', error);
-        //         });
-        // }
-// Load all missions on page load loadMissions();
-	loadMissions();
-	</script>
-
-</body> </html>
