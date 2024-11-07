@@ -3,12 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css" />
-    <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"></script>
-    <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/tangram/dist/tangram.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css" />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"></script>
     <title>Mission Autonomy Map</title>
     <style>
         #map {
@@ -112,10 +113,14 @@
     </div>
     <div id="map"></div>
     <script>
-        var map = L.map('map').setView([24.7136, 46.6753], 10);
-        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
-        }).addTo(map);
+// Initialize the map using Leaflet
+var map = L.map('map').setView([24.7136, 46.6753], 10);
+
+// Add the Tangram scene to the map
+Tangram.leafletLayer({
+    scene: 'https://tangrams.github.io/tangram-sandbox/styles/matrix.yaml',
+    attribution: '&copy; OpenStreetMap contributors &copy; Tangram'
+}).addTo(map);
 
         var waypoints = [];
         var polyline;
@@ -134,7 +139,7 @@
                 polyline: false,
                 rectangle: false,
                 circle: false,
-                marker: true,
+                marker: false,
             }
         });
         map.addControl(drawControl);
@@ -193,8 +198,7 @@
                 });
             });
         });
-
-        function loadMissions() {
+	function loadMissions() {
             fetch('/missions')
                 .then(response => response.json())
                 .then(data => {
@@ -345,54 +349,6 @@
             };
         }
 
-
-function checkGeofenceAlert(lat, lng) { let alertShown = false;
-	drawnItems.eachLayer(function (layer) {
-    if (layer.options.vertices) {
-        const vertices = layer.options.vertices;
-        const polygon = L.polygon(vertices);
-        if (!polygon.getBounds().contains([lat, lng])) {
-            alertShown = true;
-            document.getElementById('geofence-alert').classList.remove('hidden');
-        }
-    	}
-	});
-
-if (!alertShown) {
-    document.getElementById('geofence-alert').classList.add('hidden');
-}
-}
-	 function addGeofence(vertices) {
-        const missionID = document.getElementById("mission-select").value;
-
-        if (!missionID) {
-            alert("Please select a mission first.");
-            return;
-        }
-
-        const geofenceData = {
-            mission_id: parseInt(missionID),
-            name: "New Geofence",
-            vertices: vertices
-        };
-
-        fetch('/add_geofence', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify(geofenceData)
-        }).then(response => {
-            if (response.ok) {
-                alert("Geofence saved successfully!");
-            } else {
-                alert("Failed to save geofence.");
-            }
-        }).catch(error => {
-            console.error("Error saving geofence:", error);
-        });
-    }
-
         // function updateMissionSummary(missionID) {
         //     fetch(`/?mission_id=${missionID}`)
         //         .then(response => response.json())
@@ -404,8 +360,30 @@ if (!alertShown) {
         //             console.error('Error fetching mission summary:', error);
         //         });
         // }
-// Load all missions on page load loadMissions();
-	loadMissions();
-	</script>
 
-</body> </html>
+        function checkGeofenceAlert(lat, lng) {
+            let alertShown = false;
+
+            drawnItems.eachLayer(function (layer) {
+                if (layer.options.vertices) {
+                    const vertices = layer.options.vertices;
+                    const polygon = L.polygon(vertices);
+                    if (!polygon.getBounds().contains([lat, lng])) {
+                        alertShown = true;
+                        document.getElementById('geofence-alert').classList.remove('hidden');
+                    }
+                }
+            });
+
+            if (!alertShown) {
+                document.getElementById('geofence-alert').classList.add('hidden');
+            }
+        }
+
+        // Load all missions on page load
+        loadMissions();
+        loadMissions();
+    </script>
+</body>
+</html>
+
